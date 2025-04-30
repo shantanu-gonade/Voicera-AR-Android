@@ -81,7 +81,7 @@ fun VideoScreen(
     val collisionSystem = rememberCollisionSystem(view)
 
     // Face tracking state
-    var augmentedFaceNode by remember { mutableStateOf<AugmentedFaceNode?>(null) }
+    var augmentedFaceNode by remember { mutableStateOf<AugmentedFaceNodeModel?>(null) }
     var mustacheNode by remember { mutableStateOf<ModelNode?>(null) }
     var currentMustacheIndex by remember { mutableStateOf(-1) }
     var trackingFailureReason by remember { mutableStateOf<TrackingFailureReason?>(null) }
@@ -162,7 +162,7 @@ fun VideoScreen(
             }
 
             modelLoader.loadModelInstanceAsync(
-                fileLocation = modelPath,
+                fileLocation = "models/mustache_pencil.glb",
                 onResult = { modelInstance ->
                     if (modelInstance == null) {
                         Log.e("VideoScreen", "Failed to load mustache model: Model instance is null")
@@ -209,7 +209,6 @@ fun VideoScreen(
                                 )
                             }
 
-                            if (augmentedFaceNode?.trackable?.trackingState == TrackingState.TRACKING) {
                                 augmentedFaceNode?.regionNodes?.get(AugmentedFace.RegionType.NOSE_TIP)?.let { noseTipNode ->
                                     // Success case - attach the mustache
                                     newMustacheNode.parent = noseTipNode
@@ -219,9 +218,6 @@ fun VideoScreen(
                                     Log.e("VideoScreen", "Nose tip region node not found")
                                     viewModel.processIntent(VideoScreenIntent.HandleError("Nose tip region node not found"))
                                 }
-                            } else {
-                                Log.d("VideoScreen", "Face no longer tracked, not attaching mustache")
-                            }
                         } catch (e: Exception) {
                             // This exception would likely be where the "vertexCount cannot be 0" error occurs
                             Log.e("VideoScreen", "Error creating ModelNode: ${e.message}", e)
@@ -269,13 +265,7 @@ fun VideoScreen(
             // Get the first tracked face
             val face = faces.firstOrNull { it.trackingState == TrackingState.TRACKING } ?: return
 
-            // Validate face mesh data before using it
-            if (face.meshVertices == null || face.meshVertices.limit() == 0 ||
-                face.meshTextureCoordinates == null || face.meshTextureCoordinates.limit() == 0 ||
-                face.meshTriangleIndices == null || face.meshTriangleIndices.limit() == 0) {
-                Log.e("VideoScreen", "Invalid face mesh data: Empty vertices, texture coordinates, or indices")
-                return
-            }
+
 
             if (augmentedFaceNode == null) {
                 try {
@@ -290,12 +280,10 @@ fun VideoScreen(
                         // Render the face using these values with OpenGL.
                     }
                     // Create a new augmented face node with proper error handling
-                    augmentedFaceNode = AugmentedFaceNode(
+                    augmentedFaceNode = AugmentedFaceNodeModel(
                         engine = engine,
-                        meshMaterialInstance = materialLoader.engine,
                         augmentedFace = face,
-                        onTrackingStateChanged = { trackingState ->
-                            if (trackingState != TrackingState.TRACKING && trackingState != TrackingState.PAUSED) {
+                        builder = {
                                 // Face is no longer being tracked
                                 viewModel.processIntent(VideoScreenIntent.FaceDetectionStatus(false))
                                 
@@ -305,7 +293,7 @@ fun VideoScreen(
                                         ?.remove(node)
                                     mustacheNode = null
                                 }
-                            }
+
                         }
                     ).also { newFaceNode ->
                         // Add the face node to the scene
@@ -480,7 +468,6 @@ fun VideoScreen(
                         } else {
                             Config.DepthMode.DISABLED
                         }
-                    
                     // Configure the session
                     session.configure(config)
                 },
@@ -499,7 +486,6 @@ fun VideoScreen(
                 },
                 onSessionResumed = { session ->
                     Log.d("VideoScreen", "AR session resumed")
-                    session.setCameraTextureNames()
                     viewModel.resumeArSession()
                 },
                 onSessionPaused = { session ->
@@ -514,8 +500,7 @@ fun VideoScreen(
                         updateFaceTracking(session, updatedFrame)
                         
                         // If we have a face node and a selected mustache, make sure it's applied
-                        if (augmentedFaceNode != null && 
-                            augmentedFaceNode?.trackable?.trackingState == TrackingState.TRACKING &&
+                        if (augmentedFaceNode != null &&
                             state.selectedMustacheIndex >= 0 && 
                             state.selectedMustacheIndex != currentMustacheIndex) {
                             currentMustacheIndex = state.selectedMustacheIndex
